@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: emscripten-core/setup-emsdk@v15
         with:
-          version: 3.1.64
+          version: 5.0.1
       - name: Configure WebAssembly build
         run: emcmake cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - name: Build emulator
