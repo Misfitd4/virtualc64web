@@ -27,6 +27,54 @@ using namespace vc64;
 
 u8 drive_count=1;
 
+// Small single-producer/single-consumer queue for cycle-exact SID write
+// mirroring. The emulator thread records writes; the WebAssembly UI drains
+// them in batches without blocking the reSID/audio path.
+struct WebSidWrite {
+    u64 cycle;
+    u32 reg;
+    u32 chip;
+    u32 value;
+};
+
+static constexpr u32 kWebSidWriteCapacity = 8192;
+static WebSidWrite webSidWrites[kWebSidWriteCapacity];
+static u32 webSidWriteHead = 0;
+static u32 webSidWriteTail = 0;
+static u32 webSidWriteOverflow = 0;
+
+extern "C" void wasm_record_sid_write(unsigned chip, unsigned address,
+                                       unsigned value, unsigned long long cycle)
+{
+    if (chip >= 2 || address >= 0x19) return;
+    if (webSidWriteHead - webSidWriteTail >= kWebSidWriteCapacity) {
+        ++webSidWriteTail;
+        ++webSidWriteOverflow;
+    }
+    webSidWrites[webSidWriteHead++ % kWebSidWriteCapacity] = {u64(cycle), address, chip, value & 0xFF};
+}
+
+extern "C" unsigned wasm_sid_events_read(unsigned *output, unsigned capacity)
+{
+    unsigned count = 0;
+    while (count < capacity && webSidWriteTail != webSidWriteHead) {
+        const auto &event = webSidWrites[webSidWriteTail++ % kWebSidWriteCapacity];
+        output[count * 4 + 0] = unsigned(event.cycle);
+        output[count * 4 + 1] = unsigned(event.cycle >> 32);
+        output[count * 4 + 2] = event.reg | (event.chip ? 0x20u : 0u);
+        output[count * 4 + 3] = event.value;
+        ++count;
+    }
+    return count;
+}
+
+extern "C" unsigned wasm_sid_events_overflow()
+{
+    const unsigned result = webSidWriteOverflow;
+    webSidWriteOverflow = 0;
+    return result;
+}
+
 /* SDL2 start*/
 SDL_Window * window = NULL;
 SDL_Surface * window_surface = NULL;

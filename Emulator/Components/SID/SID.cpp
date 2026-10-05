@@ -14,6 +14,9 @@
 #include "SID.h"
 #include "Emulator.h"
 
+extern "C" void wasm_record_sid_write(unsigned chip, unsigned address,
+                                       unsigned value, unsigned long long cycle);
+
 namespace vc64 {
 
 SID::SID(C64 &ref, isize id) : SubComponent(ref, id)
@@ -50,6 +53,13 @@ void
 SID::poke(u16 addr, u8 value)
 {
     sidreg[addr & 0x1F] = value;
+
+    // Mirror each SID's real CPU writes before passing them to reSID.
+    // The WebAssembly host drains these cycle-stamped events asynchronously.
+    if (objid < 2) {
+        wasm_record_sid_write(unsigned(objid), unsigned(addr & 0x1F),
+                              unsigned(value), static_cast<unsigned long long>(cpu.clock));
+    }
     
     switch (config.engine) {
 
